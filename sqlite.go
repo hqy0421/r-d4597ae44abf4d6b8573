@@ -13,22 +13,78 @@ type columnIndex struct {
 	rowid    bool
 }
 
+// ValueSource describes where a single value in a Row came from.
+//
+// SQLite stores a row as a record holding exactly the columns the table had
+// when the row was written. When columns were added later with
+// `ALTER TABLE ... ADD COLUMN` the older rows are physically shorter, and
+// SQLite reads those missing columns as the column's DEFAULT (or NULL when
+// the column has no default). That effective value is indistinguishable from
+// a stored value -- and a stored NULL is indistinguishable from a missing
+// column without a default -- by looking at the value alone. The source is
+// therefore decided while the record is decoded, from the number of columns
+// the record actually stores, never from the value.
+//
+// Table scans and index lookups decode the very same table records through
+// the same code path, so both report the same source for the same row.
+type ValueSource int
+
+const (
+	// SourceStored: the value was physically stored in the row's record.
+	SourceStored ValueSource = iota
+	// SourceStoredNull: a NULL was physically stored in the row's record.
+	SourceStoredNull
+	// SourceDefault: the row's record is too short to hold this column: the
+	// row predates the `ALTER TABLE ... ADD COLUMN` which introduced it.
+	// The value is the column's DEFAULT, or NULL when it has none.
+	SourceDefault
+	// SourceRowid: the value is the row's rowid; it is never stored in the
+	// record. Used for an `INTEGER PRIMARY KEY` column and for the
+	// rowid/oid/_rowid_ pseudo columns.
+	SourceRowid
+)
+
+func (s ValueSource) String() string {
+	switch s {
+	case SourceStored:
+		return "stored"
+	case SourceStoredNull:
+		return "stored NULL"
+	case SourceDefault:
+		return "column default"
+	case SourceRowid:
+		return "rowid"
+	default:
+		return fmt.Sprintf("ValueSource(%d)", int(s))
+	}
+}
+
 // Regroups a Record to a Row, filling in missing columns as needed.
-func toRow(rowid int64, cis []columnIndex, r sdb.Record) Row {
+//
+// The returned sources have the same length as the Row and describe where
+// every value came from. They are derived from the record's stored column
+// count, never from the values themselves.
+func toRowSource(rowid int64, cis []columnIndex, r sdb.Record) (Row, []ValueSource) {
 	row := make(Row, len(cis))
+	src := make([]ValueSource, len(cis))
 	for i, c := range cis {
-		if c.rowid {
+		switch {
+		case c.rowid:
 			row[i] = rowid
-			continue
-		}
-		if len(r) <= c.rowIndex {
+			src[i] = SourceRowid
+		case len(r) <= c.rowIndex:
 			// use 'DEFAULT' when the record is too short
 			row[i] = c.col.Default
-		} else {
+			src[i] = SourceDefault
+		case r[c.rowIndex] == nil:
+			row[i] = nil
+			src[i] = SourceStoredNull
+		default:
 			row[i] = r[c.rowIndex]
+			src[i] = SourceStored
 		}
 	}
-	return row
+	return row, src
 }
 
 // given column names returns the index in a Row this column is expected, and

@@ -6,7 +6,7 @@ import (
 	sdb "github.com/alicebob/sqlittle/db"
 )
 
-func select_(db *sdb.Database, s *sdb.Schema, cb RowDoneCB, columns []string) error {
+func select_(db *sdb.Database, s *sdb.Schema, cb RowSourceDoneCB, columns []string) error {
 	ci, err := toColumnIndexRowid(s, columns)
 	if err != nil {
 		return err
@@ -17,11 +17,12 @@ func select_(db *sdb.Database, s *sdb.Schema, cb RowDoneCB, columns []string) er
 		return err
 	}
 	return t.Scan(func(rowid int64, r sdb.Record) bool {
-		return cb(toRow(rowid, ci, r))
+		row, src := toRowSource(rowid, ci, r)
+		return cb(row, src)
 	})
 }
 
-func selectNonRowid(db *sdb.Database, s *sdb.Schema, cb RowDoneCB, columns []string) error {
+func selectNonRowid(db *sdb.Database, s *sdb.Schema, cb RowSourceDoneCB, columns []string) error {
 	ci, err := toColumnIndexNonRowid(s, columns)
 	if err != nil {
 		return err
@@ -32,29 +33,31 @@ func selectNonRowid(db *sdb.Database, s *sdb.Schema, cb RowDoneCB, columns []str
 		return err
 	}
 	return t.Scan(func(r sdb.Record) bool {
-		return cb(toRow(0, ci, r))
+		row, src := toRowSource(0, ci, r)
+		return cb(row, src)
 	})
 }
 
-func selectRowid(db *sdb.Database, s *sdb.Schema, rowid int64, columns []string) (Row, error) {
+func selectRowid(db *sdb.Database, s *sdb.Schema, rowid int64, columns []string) (Row, []ValueSource, error) {
 	ci, err := toColumnIndexRowid(s, columns)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	t, err := db.Table(s.Table)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	r, err := t.Rowid(rowid)
 	if err != nil || r == nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// TODO: decide what to do with shared []byte pointers
-	return toRow(rowid, ci, r), nil
+	row, src := toRowSource(rowid, ci, r)
+	return row, src, nil
 }
 
-func pkSelect(db *sdb.Database, s *sdb.Schema, key Key, cb RowCB, columns []string) error {
+func pkSelect(db *sdb.Database, s *sdb.Schema, key Key, cb RowSourceCB, columns []string) error {
 	if s.RowidPK {
 		// `integer primary key` table.
 		var rowid int64
@@ -65,12 +68,12 @@ func pkSelect(db *sdb.Database, s *sdb.Schema, key Key, cb RowCB, columns []stri
 		if !ok {
 			return errors.New("invalid key")
 		}
-		row, err := selectRowid(db, s, rowid, columns)
+		row, src, err := selectRowid(db, s, rowid, columns)
 		if err != nil {
 			return err
 		}
 		if row != nil {
-			cb(row)
+			cb(row, src)
 		}
 		return nil
 	}
@@ -94,7 +97,7 @@ func pkSelect(db *sdb.Database, s *sdb.Schema, key Key, cb RowCB, columns []stri
 	)
 }
 
-func pkSelectNonRowid(db *sdb.Database, s *sdb.Schema, key Key, cb RowCB, columns []string) error {
+func pkSelectNonRowid(db *sdb.Database, s *sdb.Schema, key Key, cb RowSourceCB, columns []string) error {
 	ci, err := toColumnIndexNonRowid(s, columns)
 	if err != nil {
 		return err
@@ -112,7 +115,8 @@ func pkSelectNonRowid(db *sdb.Database, s *sdb.Schema, key Key, cb RowCB, column
 	return t.ScanEq(
 		dbkey,
 		func(r sdb.Record) bool {
-			cb(toRow(0, ci, r))
+			row, src := toRowSource(0, ci, r)
+			cb(row, src)
 			return false
 		},
 	)

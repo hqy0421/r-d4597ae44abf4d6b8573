@@ -2,6 +2,7 @@
 
 ALL:= \
     alter.sqlite \
+    alter_history.sqlite \
     empty.sqlite \
     expr.sqlite \
     four.sqlite \

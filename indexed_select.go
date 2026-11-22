@@ -9,7 +9,7 @@ func indexedSelect(
 	db *sdb.Database,
 	schema *sdb.Schema,
 	index *sdb.SchemaIndex,
-	cb RowCB,
+	cb RowSourceCB,
 	columns []string,
 ) error {
 	ci, err := toColumnIndexRowid(schema, columns)
@@ -32,12 +32,13 @@ func indexedSelect(
 		if err != nil {
 			return false
 		}
-		row, err := tab.Rowid(rowid)
-		if err != nil || row == nil {
-			// row should never be nil
+		rec, err := tab.Rowid(rowid)
+		if err != nil || rec == nil {
+			// rec should never be nil
 			return false
 		}
-		cb(toRow(rowid, ci, row))
+		row, src := toRowSource(rowid, ci, rec)
+		cb(row, src)
 		return false
 	})
 }
@@ -48,7 +49,7 @@ func indexedSelectEq(
 	schema *sdb.Schema,
 	index *sdb.SchemaIndex,
 	key sdb.Key,
-	cb RowCB,
+	cb RowSourceCB,
 	columns []string,
 ) error {
 	ci, err := toColumnIndexRowid(schema, columns)
@@ -73,12 +74,13 @@ func indexedSelectEq(
 			if err != nil {
 				return false
 			}
-			row, err := tab.Rowid(rowid)
-			if err != nil || row == nil {
-				// row should never be nil
+			rec, err := tab.Rowid(rowid)
+			if err != nil || rec == nil {
+				// rec should never be nil
 				return false
 			}
-			cb(toRow(rowid, ci, row))
+			row, src := toRowSource(rowid, ci, rec)
+			cb(row, src)
 			return false
 		})
 }
@@ -88,7 +90,7 @@ func indexedSelectNonRowid(
 	db *sdb.Database,
 	schema *sdb.Schema,
 	index *sdb.SchemaIndex,
-	cb RowCB,
+	cb RowSourceCB,
 	columns []string,
 ) error {
 	ci, err := toColumnIndexNonRowid(schema, columns)
@@ -126,7 +128,8 @@ func indexedSelectNonRowid(
 			// found should never be nil
 			return false
 		}
-		cb(toRow(0, ci, found))
+		row, src := toRowSource(0, ci, found)
+		cb(row, src)
 		return false
 	})
 }
@@ -137,7 +140,7 @@ func indexedSelectEqNonRowid(
 	schema *sdb.Schema,
 	index *sdb.SchemaIndex,
 	key sdb.Key,
-	cb RowCB,
+	cb RowSourceCB,
 	columns []string,
 ) error {
 	ci, err := toColumnIndexNonRowid(schema, columns)
@@ -174,7 +177,8 @@ func indexedSelectEqNonRowid(
 				// found should never be nil
 				return false
 			}
-			cb(toRow(0, ci, found))
+			row, src := toRowSource(0, ci, found)
+			cb(row, src)
 			return false
 		},
 	)

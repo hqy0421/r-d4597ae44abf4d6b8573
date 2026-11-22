@@ -36,6 +36,18 @@ type RowCB func(Row)
 // Like RowCB, but return `true` when you're done reading rows
 type RowDoneCB func(Row) bool
 
+// RowSourceCB is like RowCB, but the callback also gets the source of every
+// value in the row: whether it was stored in the row, stored as NULL, or
+// filled in from the column's DEFAULT because the row predates the
+// `ALTER TABLE ... ADD COLUMN` which introduced the column. See ValueSource.
+//
+// The sources slice has the same length as the row, and is freshly allocated
+// for every row.
+type RowSourceCB func(Row, []ValueSource)
+
+// Like RowSourceCB, but return `true` when you're done reading rows
+type RowSourceDoneCB func(Row, []ValueSource) bool
+
 // Select the columns from every row from the given table. Order is the rowid
 // order for rowid tables, and the ordered primary key for non-rowid tables
 // (`WITHOUT ROWID`).
@@ -53,6 +65,23 @@ func (db *DB) Select(table string, cb RowCB, columns ...string) error {
 // SelectDone is the same as Select(), but the callback can stop the iterating.
 // Useful for implementing things like `LIMIT`.
 func (db *DB) SelectDone(table string, cb RowDoneCB, columns ...string) error {
+	return db.SelectDoneWithSource(table, func(row Row, _ []ValueSource) bool {
+		return cb(row)
+	}, columns...)
+}
+
+// SelectWithSource is the same as Select(), but the callback also gets the
+// source of every value. See ValueSource.
+func (db *DB) SelectWithSource(table string, cb RowSourceCB, columns ...string) error {
+	return db.SelectDoneWithSource(table, func(row Row, src []ValueSource) bool {
+		cb(row, src)
+		return false // not done
+	}, columns...)
+}
+
+// SelectDoneWithSource is the same as SelectDone(), but the callback also
+// gets the source of every value. See ValueSource.
+func (db *DB) SelectDoneWithSource(table string, cb RowSourceDoneCB, columns ...string) error {
 	if err := db.db.RLock(); err != nil {
 		return err
 	}
@@ -73,17 +102,24 @@ func (db *DB) SelectDone(table string, cb RowDoneCB, columns ...string) error {
 // Select by rowid. Returns a nil row if the rowid isn't found.
 // Returns an error on a non-rowid table ('WITHOUT ROWID').
 func (db *DB) SelectRowid(table string, rowid int64, columns ...string) (Row, error) {
+	row, _, err := db.SelectRowidWithSource(table, rowid, columns...)
+	return row, err
+}
+
+// SelectRowidWithSource is the same as SelectRowid(), but also returns the
+// source of every value in the row. See ValueSource.
+func (db *DB) SelectRowidWithSource(table string, rowid int64, columns ...string) (Row, []ValueSource, error) {
 	if err := db.db.RLock(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer db.db.RUnlock()
 
 	s, err := db.db.Schema(table)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if s.WithoutRowid {
-		return nil, errors.New("can't use SelectRowid on a WITHOUT ROWID table")
+		return nil, nil, errors.New("can't use SelectRowid on a WITHOUT ROWID table")
 	}
 	return selectRowid(db.db, s, rowid, columns)
 }
@@ -98,6 +134,16 @@ func (db *DB) SelectRowid(table string, rowid int64, columns ...string) (Row, er
 // If the index has a WHERE expression only the rows matching that expression
 // will be matched.
 func (db *DB) IndexedSelect(table, index string, cb RowCB, columns ...string) error {
+	return db.IndexedSelectWithSource(table, index, func(row Row, _ []ValueSource) {
+		cb(row)
+	}, columns...)
+}
+
+// IndexedSelectWithSource is the same as IndexedSelect(), but the callback
+// also gets the source of every value. The values and sources come from the
+// data table (the index only provides the row order), so they match what
+// SelectWithSource() reports for the same rows. See ValueSource.
+func (db *DB) IndexedSelectWithSource(table, index string, cb RowSourceCB, columns ...string) error {
 	if err := db.db.RLock(); err != nil {
 		return err
 	}
@@ -145,6 +191,16 @@ func (db *DB) IndexedSelect(table, index string, cb RowCB, columns ...string) er
 // If the index has a WHERE expression only the rows matching that expression
 // will be matched.
 func (db *DB) IndexedSelectEq(table, index string, key Key, cb RowCB, columns ...string) error {
+	return db.IndexedSelectEqWithSource(table, index, key, func(row Row, _ []ValueSource) {
+		cb(row)
+	}, columns...)
+}
+
+// IndexedSelectEqWithSource is the same as IndexedSelectEq(), but the
+// callback also gets the source of every value. The values and sources come
+// from the data table (the index only finds the rows), so they match what
+// SelectWithSource() reports for the same rows. See ValueSource.
+func (db *DB) IndexedSelectEqWithSource(table, index string, key Key, cb RowSourceCB, columns ...string) error {
 	if err := db.db.RLock(); err != nil {
 		return err
 	}
@@ -182,6 +238,14 @@ func (db *DB) IndexedSelectEq(table, index string, key Key, cb RowCB, columns ..
 // PKSelect is especially efficient for non-rowid tables (`WITHOUT ROWID`), and
 // for rowid tables which have a single 'integer primary key' column.
 func (db *DB) PKSelect(table string, key Key, cb RowCB, columns ...string) error {
+	return db.PKSelectWithSource(table, key, func(row Row, _ []ValueSource) {
+		cb(row)
+	}, columns...)
+}
+
+// PKSelectWithSource is the same as PKSelect(), but the callback also gets
+// the source of every value. See ValueSource.
+func (db *DB) PKSelectWithSource(table string, key Key, cb RowSourceCB, columns ...string) error {
 	if err := db.db.RLock(); err != nil {
 		return err
 	}

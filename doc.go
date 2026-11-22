@@ -43,6 +43,9 @@ Things SQLittle can do:
   - indexes with expression (either in columns or as a `WHERE`) are (partially) supported
   - Scan() to most Go datatypes, including `time.Time`
   - Works on Linux, Mac OS, and Windows
+  - rows which predate an `ALTER TABLE ... ADD COLUMN` read the new columns
+    as their DEFAULT, and the `...WithSource` select variants report whether
+    every value was stored, stored as NULL, or filled in from the default
 
 Things SQLittle should do:
 

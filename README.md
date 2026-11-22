@@ -40,6 +40,7 @@ Things SQLittle can do:
 - Scan() to most Go datatypes, including `time.Time`
 - works on Linux, Mac OS, and Windows
 - has an experimental database/sql driver, see below
+- fills in `ALTER TABLE ... ADD COLUMN` defaults for older rows, and the `...WithSource` select variants report whether every value was stored, stored as NULL, or filled in from the column default
 ```
 
 Things SQLittle should do:
